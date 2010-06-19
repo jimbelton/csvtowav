@@ -1,0 +1,7 @@
+- re: 0x80000000 bug: can reproduce warning using 32 bit cc
+- more 24 and 32 bit testing
+- add test cases for 24 and 32 bit reads (remember to check pp and C)
+- check inline::c 24/32 bit reads on big endian platforms
+- optimize Wav/Write as was done for Wav/Read - use _init_write_sub() first,
+  then Inline::C
+- use XS instead of Inline for portability?
