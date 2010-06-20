@@ -37,6 +37,13 @@ EOF
 
 my $file = $ARGV[0];
 open(my $input, $file) or die("Can't open $file");
+
+# If the input filename ends in an extension, strip it off.
+#
+if ($file =~ /(^.*)\.\w+$/) {
+	$file = $1;
+}
+
 my $line;
 
 while ($line = <$input>) {
@@ -56,8 +63,6 @@ while ($line = <$input>) {
 	last;
 }
 
-print STDERR "line:".$line;
-
 while ($line =~ /^\(?\w+\)?[,\s]\s*\(?\w+\)?/) {
 	print STDERR "Discarding header line: $line";
 	$line = <$input>;
@@ -68,10 +73,7 @@ while ($line =~ /^\s+$/) {
 	$line = <$input>;
 }
 
-my $wav_factory = new Audio::Wav;
 my @samples = ();
-my $i;
-my $wav;
 
 while (defined($line)) {
 	my @cells   = split(/[,\s]\s*/, $line);
@@ -90,23 +92,11 @@ while (defined($line)) {
 		$origin = $columns - $channels;
 	}
 
-	if (!defined($wav)) {
-		my $details = {
-			'bits_sample'	=> $bits_per_sample,
-			'sample_rate'	=> $sample_rate,
-			'channels'	    => $channels,
-			# if you'd like this module not to use a write cache, uncomment the next line
-			#'no_cache'	=> 1,
-		};
-
-	    $wav = $wav_factory->write('testout.wav', $details);
-	}
-
 	if ($columns != $channels + $origin) {
 		die("Row does not have ".($channels + $origin)." cells");
 	}
 
-	for ($i = $origin; $i < $channels + $origin; $i++) {
+	for (my $i = $origin; $i < $channels + $origin; $i++) {
 		push(@samples, $cells[$i] * $scale);
 	}
 
@@ -114,16 +104,48 @@ while (defined($line)) {
 }
 
 print STDERR "About to count samples\n";
-my $number_of_samples = scalar(@samples);
-print STDERR "Number of samples ".$number_of_samples."\n";
+my $number_of_data = scalar(@samples);
+print STDERR "Number of samples ".$number_of_data / $channels."\n";
 
+# Create the wav file
+#
+my $wav_factory = new Audio::Wav;
+my $details = {
+			'bits_sample'	=> $bits_per_sample,
+			'sample_rate'	=> $sample_rate,
+			'channels'	    => $channels,
+			# if you'd like this module not to use a write cache, uncomment the next line
+			#'no_cache'	=> 1,
+		};
+my $wav = $wav_factory->write($file.'.wav', $details);
+my $aud;
+
+if ($opt{a}) {
+	open($aud, ">".$file.".aud") or die("Failed to create $file.aud");
+	print $aud ("SAMPLES:\t".$number_of_data / $channels."\n");
+	print $aud ("BITSPERSAMPLE:\t16\n");
+	print $aud ("CHANNELS:\t$channels\n");
+	print $aud ("SAMPLERATE:\t$sample_rate\n");
+	print $aud ("NORMALIZED:\tFALSE\n");
+}
+
+# Write the files
+#
 for (my $i = 1; $i <= $repetitions; $i++) {
-	for (my $j = 0; $j < $number_of_samples; $j += $channels) {
+	for (my $j = 0; $j < $number_of_data; $j += $channels) {
 		$wav->write(@samples[$j .. $j + $channels - 1]);
+
+		if ($aud) {
+			print $aud (join("\t", @samples[$j .. $j + $channels - 1])."\n");
+		}
 	}
 
 	print STDERR ".";
 }
 
-print STDERR "\nAbout to write the wav file out\n";
+print STDERR "\nAbout to write wav file $file.wav out\n";
 $wav->finish();
+
+if ($aud) {
+	close($aud);
+}
