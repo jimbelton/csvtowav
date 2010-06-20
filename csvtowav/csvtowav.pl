@@ -9,7 +9,7 @@
 use strict;
 use warnings;
 use FindBin qw($Bin);
-use lib $Bin;
+use lib $Bin;   # Allows you to install Audio/Wav.pm in the same directory as csvtowav.pl
 use Audio::Wav;
 
 my $channels;       # derived from the number of columns if not specified
@@ -18,14 +18,23 @@ my $bits_per_sample = 16;
 my $sample_rate     = 22100;
 my $scale           = 1;
 my $samples;        # unused for now
+my $normalized;
+
+my $origin          = 1;   # First column that contains channel data values
+my $minimum;
+my $maximum;
 my %opt;
 
-if ($ARGV[0] eq "-a") {
+if ($ARGV[0] || "" eq "-a") {
 	shift(@ARGV);
 	$opt{a} = 1;
 }
 
-scalar(@ARGV) == 1 or die("usage: csvtowav.pl [-a] <input.csv>");
+scalar(@ARGV) == 1 or die(<<EOF);
+usage: csvtowav.pl [-a] <input.csv> - generate a wav file from a text file
+    -a = Output an audition compatible version of the input file
+EOF
+
 my $file = $ARGV[0];
 open(my $input, $file) or die("Can't open $file");
 my $line;
@@ -38,7 +47,8 @@ while ($line = <$input>) {
 		elsif ($1 eq "SAMPLERATE")    { $sample_rate     = $2 }
 		elsif ($1 eq "REPETITIONS")   { $repetitions     = $2 }
 		elsif ($1 eq "SCALE")         { $scale           = $2 }
-		elsif ($1 ne "NORMALIZED")    { die("Unsupported parameter: $1"); }
+		elsif ($1 eq "NORMALIZED")    { $normalized      = $2 if ($2 ne "FALSE"); }
+		else                          { die("Unsupported parameter: $1"); }
 
 		next;
 	}
@@ -47,8 +57,15 @@ while ($line = <$input>) {
 }
 
 print STDERR "line:".$line;
-if ($line =~ /^\a+,\a+/) {
+
+while ($line =~ /^\(?\w+\)?[,\s]\s*\(?\w+\)?/) {
 	print STDERR "Discarding header line: $line";
+	$line = <$input>;
+}
+
+while ($line =~ /^\s+$/) {
+	print STDERR "Discarding blank header line: $line";
+	$line = <$input>;
 }
 
 my $wav_factory = new Audio::Wav;
@@ -56,17 +73,21 @@ my @samples = ();
 my $i;
 my $wav;
 
-while ($line = <$input>) {
-	my @cells   = split(',', $line);
+while (defined($line)) {
+	my @cells   = split(/[,\s]\s*/, $line);
 	my $columns = scalar(@cells);
 
 	if (!defined($channels)) {
 		if ($columns == 1) {
+			$origin   = 0;
 			$channels = 1;
 		}
 		else {
 			$channels = $columns - 1;
 		}
+	}
+	else {
+		$origin = $columns - $channels;
 	}
 
 	if (!defined($wav)) {
@@ -81,13 +102,15 @@ while ($line = <$input>) {
 	    $wav = $wav_factory->write('testout.wav', $details);
 	}
 
-	if (!(($columns == 1) && ($channels == 1)) && ($columns != $channels + 1)) {
-		die("Row does not have ".($channels + 1)." cells");
+	if ($columns != $channels + $origin) {
+		die("Row does not have ".($channels + $origin)." cells");
 	}
 
-	for ($i = 1; $i <= $channels; $i++) {
-		push(@samples, $cells[$i - ($columns == 1 ? 1 : 0)] * $scale);
+	for ($i = $origin; $i < $channels + $origin; $i++) {
+		push(@samples, $cells[$i] * $scale);
 	}
+
+	$line = <$input>;
 }
 
 print STDERR "About to count samples\n";
@@ -95,8 +118,8 @@ my $number_of_samples = scalar(@samples);
 print STDERR "Number of samples ".$number_of_samples."\n";
 
 for (my $i = 1; $i <= $repetitions; $i++) {
-	for (my $j = 0; $j < $number_of_samples; $j++) {
-		$wav->write($samples[$j]);
+	for (my $j = 0; $j < $number_of_samples; $j += $channels) {
+		$wav->write(@samples[$j .. $j + $channels - 1]);
 	}
 
 	print STDERR ".";
